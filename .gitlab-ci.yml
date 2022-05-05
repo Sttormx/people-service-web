@@ -1,0 +1,42 @@
+stages:
+    - build
+    - deployAWS
+
+build:
+    image: docker
+    only:
+        - PDC-317-Pedro
+    services:
+        - docker:dind
+    stage: build
+    script:
+        - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" $CI_REGISTRY
+        - docker build --pull -t "$CI_REGISTRY_IMAGE:admp_pedro" .
+        - docker push "$CI_REGISTRY_IMAGE:admp_pedro"
+
+deployAWS:
+    only:
+        - PDC-317-Pedro
+    stage: deployAWS
+    image: alpine
+    variables:
+        SERVER: $SERVER_IP_PEDRO   
+    script:
+        - apk add openssh
+        - apk add bash
+        - mkdir ~/.ssh
+        - echo "$SSH_KNOWN_HOSTS_PEDRO" >> ~/.ssh/known_hosts
+        - chmod 644 ~/.ssh/known_hosts
+        - eval $(ssh-agent -s)
+        - bash -c 'ssh-add <(echo "$SSH_PRIVATE_KEY_PEDRO")'
+
+        # Log-in docker registry
+        - ssh ubuntu@$SERVER "echo $CI_BUILD_TOKEN | docker login --username gitlab-ci-token --password-stdin registry.gitlab.com"
+
+        # Stop container
+        - ssh ubuntu@$SERVER "docker container stop admp_pedro" || true
+        - ssh ubuntu@$SERVER "docker container rm admp_pedro" || true
+        - ssh ubuntu@$SERVER "docker image rm ${CI_REGISTRY_IMAGE}:admp_pedro" || true
+
+        # Run
+        - ssh ubuntu@$SERVER "docker container run --name admp_pedro -p 80:80 -d ${CI_REGISTRY_IMAGE}:admp_pedro"
